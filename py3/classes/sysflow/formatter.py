@@ -56,6 +56,8 @@ _default_fields = [
     'file.selabel',
     'proc.sid',
     'proc.selabel',
+    'proc.proc_sid',
+    'proc.proc_selabel',
     #'container.id',
 ]
 
@@ -88,7 +90,9 @@ _fields = {  #   '<key>': (<columnn name>, <column width>, <description>, <query
     'proc.entry': ('Entry', 5, 'Process container entrypoint', False),
     'proc.createts': ('Proc. Creation Time', 21, 'Process creation timestamp', False),
     'proc.sid': ('ProcSID', 5, 'PSE Linux SID', False),
-    'proc.selabel': ('ProcSELabel', 10, 'PSE Linux Label', False),
+    'proc.selabel': ('ProcSELabel', 20, 'PSE Linux Label', False),
+    'proc.proc_sid': ('ProcPSID', 5, 'Proc SE Linux SID', False),
+    'proc.proc_selabel': ('ProcPSELabel', 20, 'Proc SE Linux Label', False),
     'pproc.pid': ('PPID', 8, 'Parent process ID', False),
     'pproc.gid': ('PGID', 5, 'Parent process group ID', False),
     'pproc.uid': ('PUID', 5, 'Parent process user ID', False),
@@ -423,6 +427,8 @@ class SFFormatter(object):
         _flat_map['proc.createts'] = int(proc.oid.createTS) if proc else None
         _flat_map['proc.sid'] = int(proc.sid) if proc else None
         _flat_map['proc.selabel'] = str(proc.selabel) if proc else None
+        _flat_map['proc.proc_sid'] = int(proc.proc_sid) if proc else None
+        _flat_map['proc.proc_selabel'] = str(proc.proc_selabel) if proc else None
         _flat_map['pproc.pid'] = int(pproc.oid.hpid) if pproc else None
         _flat_map['pproc.gid'] = int(pproc.gid) if pproc else None
         _flat_map['pproc.uid'] = int(pproc.uid) if pproc else None

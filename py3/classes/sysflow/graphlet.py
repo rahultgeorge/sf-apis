@@ -71,9 +71,8 @@ FLOW_FIELDS = [
     'flow.rops',
     'flow.wbytes',
     'flow.wops',
-    'container.id',
-    'tags',
 ]
+
 EVT_FIELDS = [
     'ts_uts',
     'type',
@@ -84,6 +83,24 @@ EVT_FIELDS = [
     'proc.exe',
     'proc.args',
     'pproc.exe',
+    'res',
+]
+
+CONT_FIELDS = [
+    'container.id',
+    'container.name',
+]
+
+SID_FIELDS = [
+    'proc.sid',
+    'proc.selabel',
+    'proc.proc_sid',
+    'proc.proc_selabel',
+    'file.sid',
+    'file.selabel',
+]
+
+TAGS_FIELDS = [
     'tags',
 ]
 
@@ -114,6 +131,7 @@ class Graphlet(object):
     mitigations_normalized = pd.DataFrame()
     associated_mitigations_normalized = pd.DataFrame()
     defend_data = {}
+    ivs_count_data = {}
 
     def __init__(self, path, expr=None, defs=[]):
         """Create graphlet object from raw sysflow with optional filters and policy taggers.
@@ -166,7 +184,6 @@ class Graphlet(object):
                     proc.userName,
                     proc.gid,
                     proc.groupName,
-                    proc.tty,
                 ) == (
                     pproc.exe,
                     pproc.exeArgs,
@@ -174,20 +191,45 @@ class Graphlet(object):
                     pproc.userName,
                     pproc.gid,
                     pproc.groupName,
-                    pproc.tty,
                 ):
                     self.__addProcEvtEdge(opflag, proc, pproc, r, filt)
 
-                filt = lambda v: (v.exe, v.args, v.uid, v.user, v.gid, v.group, v.tty) != (
-                    proc.exe,
-                    proc.exeArgs,
-                    proc.uid,
-                    proc.userName,
-                    proc.gid,
-                    proc.groupName,
-                    proc.tty,
-                ) and v.hasProc(proc.oid.hpid, proc.oid.createTS)
+                filt = (
+                    lambda v: (v.exe, v.args, v.tty)
+                    != (
+                        proc.exe,
+                        proc.exeArgs,
+                        proc.tty,
+                    )
+                    and (v.uid, v.user, v.gid, v.group)
+                    == (
+                        proc.uid,
+                        proc.userName,
+                        proc.gid,
+                        proc.groupName,
+                    )
+                    and v.hasProc(proc.oid.hpid, proc.oid.createTS)
+                )
                 if opflag == utils.getOpFlagsStr(opflags.OP_EXEC):
+                    self.__addProcEvtEdge(opflag, proc, pproc, r, filt)
+
+                filt = (
+                    lambda v: (v.exe, v.args, v.tty)
+                    == (
+                        proc.exe,
+                        proc.exeArgs,
+                        proc.tty,
+                    )
+                    and (v.uid, v.user, v.gid, v.group)
+                    != (
+                        proc.uid,
+                        proc.userName,
+                        proc.gid,
+                        proc.groupName,
+                    )
+                    and v.hasProc(proc.oid.hpid, proc.oid.createTS)
+                )
+                if opflag == utils.getOpFlagsStr(opflags.OP_SETUID):
                     self.__addProcEvtEdge(opflag, proc, pproc, r, filt)
 
                 filt = lambda v: (v.exe, v.args, v.uid, v.user, v.gid, v.group, v.tty) == (
@@ -246,19 +288,16 @@ class Graphlet(object):
             n1_v = self.nodes[n1_k]
         else:
             n1_v = ProcessNode(
-                n1_k, proc.exe, proc.exeArgs, proc.uid, proc.userName, proc.gid, proc.groupName, proc.tty
+                n1_k, proc.exe, proc.exeArgs, proc.uid, proc.userName, proc.gid, proc.groupName, proc.tty, proc.env, proc.sid, proc.selabel, proc.proc_sid, proc.proc_selabel
             )
         n1_v.addProc(proc.oid.hpid, proc.oid.createTS, r)
         self.nodes[n1_k] = n1_v
 
-        if opflag == utils.getOpFlagsStr(opflags.OP_EXEC):
-            p = pproc
-            n2_k, n2_v = self.__findNode(filt)
-        if opflag == utils.getOpFlagsStr(opflags.OP_CLONE):
-            p = pproc
-            n2_k, n2_v = self.__findNode(filt)
         if opflag == utils.getOpFlagsStr(opflags.OP_EXIT):
             p = proc
+            n2_k, n2_v = self.__findNode(filt)
+        else:  # OP_CLONE, OP_EXEC, OP_SETUID
+            p = pproc
             n2_k, n2_v = self.__findNode(filt)
 
         if not n2_k:
@@ -273,7 +312,7 @@ class Graphlet(object):
             if n2_k in self.nodes:
                 n2_v = self.nodes[n2_k]
             else:
-                n2_v = ProcessNode(n2_k, p.exe, p.exeArgs, p.uid, p.userName, p.gid, p.groupName, p.tty)
+                n2_v = ProcessNode(n2_k, p.exe, p.exeArgs, p.uid, p.userName, p.gid, p.groupName, p.tty, p.env, p.sid, p.selabel, p.proc_sid, p.proc_selabel)
             n2_v.addProc(
                 p.oid.hpid,
                 p.oid.createTS,
@@ -346,7 +385,7 @@ class Graphlet(object):
                     n2_v = self.nodes[n2_k]
                 else:
                     n2_v = ProcessNode(
-                        n2_k, proc.exe, proc.exeArgs, proc.uid, proc.userName, proc.gid, proc.groupName, proc.tty
+                        n2_k, proc.exe, proc.exeArgs, proc.uid, proc.userName, proc.gid, proc.groupName, proc.tty, proc.env, proc.sid, proc.selabel, proc.proc_sid, proc.proc_selabel
                     )
                 n2_v.addProc(
                     proc.oid.hpid,
@@ -419,7 +458,7 @@ class Graphlet(object):
                     n2_v = self.nodes[n2_k]
                 else:
                     n2_v = ProcessNode(
-                        n2_k, proc.exe, proc.exeArgs, proc.uid, proc.userName, proc.gid, proc.groupName, proc.tty
+                        n2_k, proc.exe, proc.exeArgs, proc.uid, proc.userName, proc.gid, proc.groupName, proc.tty, proc.env, proc.sid, proc.selabel, proc.proc_sid, proc.proc_selabel
                     )
                 n2_v.addProc(
                     proc.oid.hpid,
@@ -618,6 +657,7 @@ class Graphlet(object):
             countermeasures = pd.concat([countermeasures, cmdf[cmdf['technique_id'] == e]])
         return countermeasures
 
+    
     def view(self, withoid=False, peek=True, peeksize=3, flows=True, ttps=False):
         """Visualizes the graph in dot format.
 
@@ -668,6 +708,8 @@ class Graphlet(object):
         for e in self.edges:
             t = self.nodes[e.nto()].interval()
             label = '    {0} ({1},{2})'.format(e.op(), t[0], t[1])
+            if isinstance(e, RelEdge):
+                g.edge(str(e.nfrom()), str(e.nto()), label=label, style='dashed', dir='both', arrowhead='dot', arrowtail='dot', color='red', fontcolor='red', fontsize='9')
             if isinstance(e, EvtEdge):
                 g.edge(str(e.nfrom()), str(e.nto()), label=label)
             if flows and isinstance(e, FlowEdge) and len(self.nodes[e.n2].df()) > 0:
@@ -764,6 +806,198 @@ class Graphlet(object):
                     g.edge(str(e.nfrom()), str(e.nto()), label=label, style='dashed')
         return g
 
+    def intersection(self, other, withoid=False, peek=True, peeksize=3, flows=True, ttps=False):
+        """Computes the intersection of a graph with another graph, returning the graph corresponding to the intersection of the two graphs.
+
+        :param other: the other graphlet to compute the intersection.
+        :type other: Graphlet
+        """
+        lndiff = set(self.nodes) - set(other.nodes)
+        lediff = set(self.edges) - set(other.edges)
+        g = self.__clone()
+        for n in lndiff:
+            del g.nodes[n]
+        for e in lediff:
+            g.edges.remove(e)
+        return g
+
+    def strictIntersection(self, other, withoid=False, peek=True, peeksize=3, flows=True, ttps=False):
+        """Computes the actual intersection of a graph with another graph, returning the graph corresponding to the intersection of the two graphs.
+
+        :param other: the other graphlet to compute the intersection.
+        :type other: Graphlet
+        """
+        lndiff = set(self.nodes) - set(other.nodes)
+        lediff = set(self.edges) - set(other.edges)
+        rndiff = set(other.nodes) - set(self.nodes)
+        rediff = set(other.edges) - set(self.edges)
+        g = self.__clone()
+        for n in lndiff:
+            del g.nodes[n]
+        for e in lediff:
+            g.edges.remove(e)
+      
+        for n in rndiff:
+            if n in g.nodes:
+                del g.nodes[n]
+        for e in rediff:
+            if e in g.edges:
+                g.edges.remove(e)        
+                
+        return g
+
+    def __tag(self, n, label):
+        if not label:
+            return
+        if len(n.data) > 0:
+            tags = n.data[0]['tags']
+            t0 = tags[0] if tags else []
+            t1 = tags[1] if tags else set()
+            t2 = tags[2] if tags else 0
+            hasTag = any(e for e in [t == label for t in t0])
+            if not hasTag:
+                n.data[0]['tags'] = (t0 + [label], t1.union(set([label])), max(t2, 1))
+
+    def __prune(self):
+        for e in self.edges.copy():
+            nto = self.nodes[e.nto()]
+            nfrom = self.nodes[e.nfrom()]
+            if not nto.tainted or not nfrom.tainted:
+                self.edges.remove(e)
+        for k, v in self.nodes.copy().items():
+            if not v.tainted:
+                del self.nodes[k]
+
+    def __bt(self, fringe, label):
+        tnodes = set()
+        for n in fringe:
+            for e in self.edges:
+                if e.nto() == n:
+                    nfrom = self.nodes[e.nfrom()]
+                    self.__tag(nfrom, label)
+                    if not nfrom.tainted:
+                        nfrom.tainted = True
+                        tnodes.add(e.nfrom())
+        if len(tnodes) > 0:
+            self.__bt(tnodes, label)
+
+    def bt(self, cond, prune=True, label=None):
+        """Performs a backward traversal on the graph from nodes matching a condition.
+
+        Example Usage::
+            def passwd(df):
+                return len(df[(df['file.path'].str.contains('passwd'))])>0
+            cond = lambda n: passwd(n.df())
+            g.bt(cond, prune=True, label='discovery').view()
+
+        :param cond: a lambda describing a predicate over node properties.
+        :type cond: a lambda predicate that received a node object as argument and returns True or False.
+
+        :param prune: if true, nodes outside the dominance paths of matched nodes are pruned.
+        :type prune: boolean
+
+        :param label: if set, add a label to nodes in the dominance paths of matched nodes.
+        :type label: string
+        """
+        g = self.__clone()
+        for k, v in g.nodes.items():
+            v.tainted = False
+        for k, v in reversed(g.nodes.items()):
+            if cond(v):
+                # print("Node v matched", v)
+                if label:
+                    g.__tag(v, label)
+                v.tainted = True
+                self.__bt({v.oid}, label)
+        if prune:
+            g.__prune()
+        return g
+
+    def __ft(self, fringe, label):
+        tnodes = set()
+        for n in fringe:
+            for e in self.edges:
+                if e.nfrom() == n:
+                    nto = self.nodes[e.nto()]
+                    self.__tag(nto, label)
+                    if not nto.tainted:
+                        nto.tainted = True
+                        tnodes.add(e.nto())
+        if len(tnodes) > 0:
+            self.__ft(tnodes, label)
+
+    def ft(self, cond, prune=True, label=None):
+        """Performs a forward traversal on the graph from nodes matching a condition.
+
+        Example Usage::
+            def scp(df):
+                return len(df[(df['proc.exe'].str.contains('scp'))])>0
+            cond = lambda n: scp(n.df())
+            g.ft(cond, prune=True, label='remotecopy').view()
+
+        :param cond: a lambda describing a predicate over node properties.
+        :type cond: a lambda predicate that received a node object as argument and returns True or False.
+
+        :param prune: if true, nodes outside the dominated paths of matched nodes are pruned.
+        :type prune: boolean
+
+        :param label: if set, add a label to nodes in the dominated paths of matched nodes.
+        :type label: string
+        """
+        g = self.__clone()
+        for k, v in g.nodes.items():
+            v.tainted = False
+        for k, v in g.nodes.items():
+            if cond(v):
+                g.__tag(v, label)
+                v.tainted = True
+                self.__ft({v.oid}, label)
+        if prune:
+            g.__prune()
+        return g
+
+    def findPaths(self, source, sink, prune=True, label=None):
+        """Finds paths from source to sink nodes matching conditions.
+
+        Example Usage::
+            def scp(df):
+                return len(df[(df['proc.exe'].str.contains('scp'))])>0
+            source = lambda n: scp(n.df())
+            def passwd(df):
+                return len(df[(df['file.path'].str.contains('passwd'))])>0
+            sink = lambda n: passwd(n.df())
+            g.findPaths(source, sink, prune=True, label='exfil').view()
+
+        :param source: a lambda describing a predicate over node properties.
+        :type source: a lambda predicate that received a node object as argument and returns True or False.
+
+        :param sink: a lambda describing a predicate over node properties.
+        :type sink: a lambda predicate that received a node object as argument and returns True or False.
+
+        :param prune: if true, nodes outside the paths connecting matched nodes are pruned.
+        :type prune: boolean
+
+        :param label: if set, add a label to nodes in the paths connecting matched nodes.
+        :type label: string
+        """
+        g1 = self.bt(sink, prune=prune)
+        g2 = self.ft(source, prune=True)
+        g = g2.intersection(g1)
+        if label:
+            for k, v in g.nodes.items():
+                g.__tag(v, label)
+        # return g if prune else self
+        return g 
+
+    def __clone(self):
+        g = Graphlet.__new__(Graphlet)
+        g.nodes = self.nodes.copy()
+        g.edges = self.edges.copy()
+        return g
+
+    def getGraphClone(self):
+        return self.__clone()
+    
     def __str__(self):
         nodes = reduce(lambda s1, s2: str(s1) + str(s2) + '\n', self.nodes.values(), '')
         edges = reduce(lambda s1, s2: str(s1) + str(s2) + '\n', self.edges, '')
@@ -780,11 +1014,12 @@ class Edge(object):
     :type edge: sysflow.Edge
     """
 
-    def __init__(self, n1, n2, label):
+    def __init__(self, n1, n2, label, extendedAttributes = None):
         super().__init__()
         self.n1 = n1
         self.n2 = n2
         self.label = label
+        self.extendedAttributes = extendedAttributes
 
 
 class EvtEdge(Edge):
@@ -863,6 +1098,44 @@ class FlowEdge(Edge):
         return 'edge: [{0}] -- {1} --> [{2}]'.format(self.n1, self.label, self.n2)
 
 
+class RelEdge(Edge):
+    """
+    **RelEdge**
+
+    This class represents a relational edge. It is used
+    to connect different sysflow objects and subclasses Edge.
+
+    :param reledge: an edge connecting two sysflow objects.
+    :type reledge: sysflow.RelEdge
+    """
+
+    def __init__(self, n1, n2, label, extendedAttributes = None):
+        super().__init__(n1, n2, label, extendedAttributes)
+
+    def nfrom(self):
+        return self.n1
+
+    def nto(self):
+        return self.n2
+
+    def op(self):
+        return self.label
+
+    def __key(self):
+        return (self.n1, self.n2, self.label)
+
+    def __hash__(self):
+        return _hash(self.__key())
+
+    def __eq__(self, other):
+        if isinstance(other, EvtEdge):
+            return self.__key() == other.__key()
+        return NotImplemented
+
+    def __str__(self):
+        return 'rel: [{0}] -- {1} -- [{2}]'.format(self.n1, self.label, self.n2)
+
+
 class Node(object):
     """
     **Node**
@@ -876,6 +1149,7 @@ class Node(object):
     def __init__(self, oid):
         super().__init__()
         self.oid = oid
+        self.tainted = False
 
 
 class ProcessNode(Node):
@@ -888,7 +1162,7 @@ class ProcessNode(Node):
     :type proc: sysflow.ProcessNode
     """
 
-    def __init__(self, oid, exe, args, uid, user, gid, group, tty):
+    def __init__(self, oid, exe, args, uid, user, gid, group, tty, env, sid, selabel, proc_sid, proc_selabel):
         super().__init__(oid)
         self.type = 'P'
         self.exe = exe
@@ -897,9 +1171,15 @@ class ProcessNode(Node):
         self.user = user
         self.gid = gid
         self.group = group
-        self.tty = tty
+        self.tty = tty        
+        self.env = env
+        self.sid = sid
+        self.selabel = selabel
+        self.proc_sid = proc_sid
+        self.proc_selabel = proc_selabel
         self.procs = set()
         self.data = list()
+
 
     def addProc(self, pid, createTS, r):
         self.procs.add((pid, createTS))
@@ -934,6 +1214,14 @@ class ProcessNode(Node):
             if len(r['tags']) > 0:
                 for t in r['tags'][1]:
                     tags.add(str(t))
+        if self.sid:
+            tags.add(f'sid:{self.sid}')
+        if self.selabel:
+            tags.add(f'selabel:{self.selabel}')
+        if self.proc_sid:
+            tags.add(f'sid:{self.proc_sid}')
+        if self.proc_selabel:
+            tags.add(f'selabel:{self.proc_selabel}')    
         return tags if len(tags) > 0 else None
 
     def dot(self, withoid=False, peek=True, peeksize=3, showtags=False):
@@ -946,20 +1234,22 @@ class ProcessNode(Node):
         peekstr = '\\n'.join(details)
         exe = _escape(self.exe)
         args = _escape(self.args)
+        selabel = _escape(self.selabel)
+        proc_selabel=_escape(self.proc_selabel)
         tags = '|{{{0}}}'.format(str(self.tags())) if showtags and self.tags() else ''
         if peek:
             return (
                 peekoidnode.format(
-                    self.oid, exe, args, peekstr, self.user, self.uid, self.group, self.gid, self.tty, tags
+                    self.oid, exe+" "+proc_selabel, args, peekstr, self.user, self.uid, self.group, self.gid, self.tty, tags
                 )
                 if withoid
-                else peeknode.format(exe, args, peekstr, self.user, self.uid, self.group, self.gid, self.tty, tags)
+                else peeknode.format(exe+" "+proc_selabel, args, peekstr, self.user, self.uid, self.group, self.gid, self.tty, tags)
             )
         else:
             return (
-                oidnode.format(self.oid, exe, args, self.user, self.uid, self.group, self.gid, self.tty, tags)
+                oidnode.format(self.oid, exe+" "+proc_selabel, args, self.user, self.uid, self.group, self.gid, self.tty, tags)
                 if withoid
-                else node.format(exe, args, self.user, self.uid, self.group, self.gid, self.tty, tags)
+                else node.format(exe+" "+ proc_selabel, args, self.user, self.uid, self.group, self.gid, self.tty, tags)
             )
 
     def __key(self):
@@ -1006,7 +1296,9 @@ class FileFlowNode(Node):
             data[idx] = r.values()
         df = pd.DataFrame.from_dict(data, orient='index', columns=r.keys() if r else None)
         # return df[(df['file.path'] != '') & ((df['flow.rops'] > 0) | (df['flow.wops'] > 0))]
+        # return df[(df['file.path'] != '') & (df['file.path'] != '/0')]
         return df[(df['file.path'] != '')]
+
 
     def interval(self):
         ts = str(self.df()[['ts_uts']].min().to_string(index=False)).strip()
@@ -1043,6 +1335,14 @@ class FileFlowNode(Node):
                     tags.add(str(t))
         return tags if len(tags) > 0 else None
 
+    def getUniqueFiles(self):
+        ufiles = {}
+        for r in self.data:            
+            path = r['file.path']
+            key = f"{path} [{r['file.sid']}, {r['file.selabel']}]"            
+            ufiles[key] = 1
+        return list(ufiles.keys())
+    
     def dot(self, withoid=False, peek=True, peeksize=3, showtags=False):
         node = 'FF|{{{0}|{{{1}, {2}, {3}, {4}}}{5}}}'
         peeknode = 'FF|{{{{{0}|{1}, {2}, {3}, {4}}}|{{{5}}}{6}}}'
@@ -1055,7 +1355,7 @@ class FileFlowNode(Node):
         wop = flowstats['flow.wops']
         ufiles = len(self.df()['file.path'].unique())
         res = self.df()[['res', 'ts_uts']].groupby(['res']).count()[['ts_uts']].rename(columns={'ts_uts': 'count'})
-        reslist = res.index.tolist()
+        reslist = self.getUniqueFiles()
         details = reslist[-peeksize:] + (reslist[peeksize:] and ['...'])
         peekstr = _escape('\\n'.join(details))
         tags = '|{{{0}}}'.format(str(self.tags())) if showtags and self.tags() else ''

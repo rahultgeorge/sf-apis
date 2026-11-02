@@ -38,5 +38,7 @@ record Process {
   array<string> env;
   long sid;
   string selabel;
+  long proc_sid;
+  string proc_selabel;
 }
 }

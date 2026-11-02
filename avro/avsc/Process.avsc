@@ -73,5 +73,11 @@
   }, {
     "name" : "selabel",
     "type" : "string"
+  }, {
+    "name" : "proc_sid",
+    "type" : "long"
+  }, {
+    "name" : "proc_selabel",
+    "type" : "string"
   } ]
 }

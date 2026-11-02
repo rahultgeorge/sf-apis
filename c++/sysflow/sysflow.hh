@@ -163,6 +163,8 @@ struct Process {
     std::vector<std::string > env;
     int64_t sid;
     std::string selabel;
+    int64_t proc_sid;
+    std::string proc_selabel;
     Process() :
         state(SFObjectState()),
         oid(OID()),
@@ -180,7 +182,9 @@ struct Process {
         cwd(std::string()),
         env(std::vector<std::string >()),
         sid(int64_t()),
-        selabel(std::string())
+        selabel(std::string()),
+        proc_sid(int64_t()),
+        proc_selabel(std::string())
         { }
 };
 
@@ -1042,6 +1046,8 @@ template<> struct codec_traits<sysflow::Process> {
         avro::encode(e, v.env);
         avro::encode(e, v.sid);
         avro::encode(e, v.selabel);
+        avro::encode(e, v.proc_sid);
+        avro::encode(e, v.proc_selabel);
     }
     static void decode(Decoder& d, sysflow::Process& v) {
         if (avro::ResolvingDecoder *rd =
@@ -1101,6 +1107,12 @@ template<> struct codec_traits<sysflow::Process> {
                 case 16:
                     avro::decode(d, v.selabel);
                     break;
+                case 17:
+                    avro::decode(d, v.proc_sid);
+                    break;
+                case 18:
+                    avro::decode(d, v.proc_selabel);
+                    break;
                 default:
                     break;
                 }
@@ -1123,6 +1135,8 @@ template<> struct codec_traits<sysflow::Process> {
             avro::decode(d, v.env);
             avro::decode(d, v.sid);
             avro::decode(d, v.selabel);
+            avro::decode(d, v.proc_sid);
+            avro::decode(d, v.proc_selabel);
         }
     }
 };
